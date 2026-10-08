@@ -8,7 +8,7 @@ terraform {
   required_providers {
     steadmesh = {
       source  = "darcys22/steadmesh"
-      version = "~> 0.4.0"
+      version = "~> 0.5.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
@@ -40,9 +40,11 @@ provider "steadmesh" {
 
 # ---------------------------------------------------------------- API keys
 #
-# Keys are stored next to the platform, not the agents. Agents never see
-# them: the platform makes model and GitHub calls on their behalf, or hands
-# a seat a short-lived credential for exactly what it is allowed to do.
+# Keys are stored next to the platform, not the agents. The model key never
+# reaches a seat: the platform makes model calls on its behalf. The GitHub
+# token is different: with delivery = "sandbox" (organisation.tf), git and gh
+# in a seat fetch it when they need it, so the agent can read it. That is why
+# it should be a fine-grained token for one test repository.
 
 resource "kubernetes_secret_v1" "llm" {
   metadata {

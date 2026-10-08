@@ -36,7 +36,7 @@ provider "helm" {
 }
 
 locals {
-  version  = "0.4.0"
+  version  = "0.5.0"
   registry = "ghcr.io/darcys22/steadmesh"
 }
 

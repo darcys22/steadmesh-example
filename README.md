@@ -35,11 +35,15 @@ Helm chart and container images (from ghcr.io) and the Terraform provider
 There are two stages because the organisation is a custom Kubernetes resource
 that only exists once the platform is installed.
 
-**Why the keys aren't given to the agents:** the API keys are stored as
-Secrets in the platform's namespace, where agents can't read them. When an
-agent calls the model, the platform makes the call with the key. When it
-uses git, the platform hands it a short-lived credential for just your
-repository.
+**Where the keys go:** both keys are stored as Secrets in the platform's
+namespace, which agents can't read. When an agent calls the model, the
+platform makes the call with the key, so the model key never reaches an
+agent. The GitHub token is different: so the team can run `git` and `gh`
+themselves, the platform hands the token to a seat when those commands need
+it, and the agent can read it. The token keeps whatever access you gave it on
+GitHub, which is why it should be scoped to one test repository. (These keys
+are also stored in `organisation/`'s Terraform state, so keep the state files
+private.)
 
 ## What you need
 
@@ -97,7 +101,7 @@ time takes a few minutes while the seat images download.
 **5. Talk to your representative**
 
 ```sh
-go install github.com/darcys22/steadmesh/cmd/orgctl@v0.4.0
+go install github.com/darcys22/steadmesh/cmd/orgctl@v0.5.0
 orgctl chat --context "$TF_VAR_kube_context" --user me
 ```
 

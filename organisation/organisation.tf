@@ -39,7 +39,7 @@ resource "steadmesh_organization" "this" {
     harness_profiles = {
       pi = {
         adapter      = "pi"
-        image_digest = "ghcr.io/darcys22/steadmesh/seat-pi:0.4.0"
+        image_digest = "ghcr.io/darcys22/steadmesh/seat-pi:0.5.0"
         model        = { connection = "llm", id = var.llm_model }
       }
     }
