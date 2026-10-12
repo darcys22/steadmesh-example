@@ -62,37 +62,50 @@ private.)
 
 ## Run it
 
+Run these commands from the root of your checkout (the directory containing
+`.env.example`) in Bash or Zsh. Terraform's `-chdir` option keeps your shell
+in that directory throughout the walkthrough.
+
 **1. Create a cluster**
 
-```sh
+```bash
 kind create cluster --name steadmesh
 ```
 
 **2. Add your keys**
 
-```sh
+```bash
 cp .env.example .env     # then fill in .env
 set -a; source .env; set +a
 ```
 
 Terraform reads any `TF_VAR_<name>` environment variable as the variable
-`<name>`, so nothing else needs configuring. Run the `source` line again in
-any new terminal.
+`<name>`. Set `TF_VAR_kube_context` in `.env` to the context you want to use
+(`kind-steadmesh` for the cluster above). Terraform, `orgctl` and the `kubectl`
+commands below all use that context rather than the current one in your
+kubeconfig.
+
+In any new terminal, return to the repository root and run
+`set -a; source .env; set +a` again before continuing. If you edit `.env`,
+reload it in the same way before running the commands again.
+
+If you use a custom kubeconfig, add `TF_VAR_kubeconfig_path=/absolute/path/to/config`
+and `KUBECONFIG="$TF_VAR_kubeconfig_path"` (in that order) to `.env` before
+loading it. Use the same single file for both so Terraform, `orgctl` and
+`kubectl` read the same configuration.
 
 **3. Install the platform**
 
-```sh
-cd platform
-terraform init
-terraform apply
+```bash
+terraform -chdir=platform init
+terraform -chdir=platform apply
 ```
 
 **4. Create the organisation**
 
-```sh
-cd ../organisation
-terraform init
-terraform apply
+```bash
+terraform -chdir=organisation init
+terraform -chdir=organisation apply
 ```
 
 `apply` returns once all four seats pass their readiness checks. The first
@@ -100,7 +113,7 @@ time takes a few minutes while the seat images download.
 
 **5. Talk to your representative**
 
-```sh
+```bash
 go install github.com/darcys22/steadmesh/cmd/orgctl@v0.5.0
 orgctl chat --context "$TF_VAR_kube_context" --user me
 ```
@@ -121,9 +134,9 @@ from the `terminal-credentials` Secret that `organisation/main.tf` creates.
 
 **6. Watch it**
 
-```sh
-kubectl -n steadmesh get agentseats
-kubectl -n steadmesh-system port-forward deploy/steadmesh-console 8090
+```bash
+kubectl --context "$TF_VAR_kube_context" -n steadmesh get agentseats
+kubectl --context "$TF_VAR_kube_context" -n steadmesh-system port-forward deploy/steadmesh-console 8090
 # open http://127.0.0.1:8090
 ```
 
@@ -134,24 +147,36 @@ work.
 
 The organisation is in `organisation/organisation.tf`:
 
-- **Add a seat:** add `instructions/<seat>.md`, copy one of the entries under
+- **Add a seat:** add `organisation/instructions/<seat>.md`, copy one of the entries under
   `seats` with `role_ref = local.instructions["<seat>"]`, and add a
   `memory_stores` entry with the same key.
 - **Let seats talk:** add a `message_routes` entry. Seats can only message
   along declared routes.
-- **Change how agents behave:** edit `instructions/*.md`. `culture.md`
+- **Change how agents behave:** edit `organisation/instructions/*.md`. `culture.md`
   applies to everyone, `team.md` to the engineering team, and the rest to one
   seat each.
 - **Change the model:** set `TF_VAR_llm_base_url`, `TF_VAR_llm_model` and
   `TF_VAR_llm_api_key` in `.env`.
 
-Run `terraform apply` again; `terraform plan` shows which seats a change
-touches. Seats keep their memory and workspace across applies.
+From the repository root, reload `.env` if you changed it, then preview and
+apply the organisation changes:
+
+```bash
+set -a; source .env; set +a
+terraform -chdir=organisation plan
+terraform -chdir=organisation apply
+```
+
+Seats keep their memory and workspace across applies.
 
 ## Tear down
 
-```sh
-cd organisation && terraform destroy
-cd ../platform && terraform destroy
+From the repository root, with `.env` loaded in this terminal:
+
+```bash
+terraform -chdir=organisation destroy
+terraform -chdir=platform destroy
+# Only if you created the kind cluster in step 1:
 kind delete cluster --name steadmesh
 ```
+
