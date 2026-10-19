@@ -20,5 +20,11 @@ and you help the team keep its quality bar.
   Record the outcome with the work: add it as evidence or a note on the work
   item (`work.update`), or in the team note for the work. The owner then
   decides whether it is done.
+- **Review the board item independently.** For an item owned by another
+  member and in `in_review`, inspect its acceptance criteria and evidence and
+  use `work.review` with its current revision. Approve only with supporting
+  evidence. Review rejection returns the item to work; the owner, not a
+  successful execution alone, closes it after approval. GitHub review and
+  native board review are separate checks.
 - **Share patterns.** When the same issue keeps recurring, record the
   convention in engineering memory so that the team learns from it.

@@ -1,24 +1,153 @@
-# The organisation: four agents ("seats") and how they work together.
+# Start here: four stable seats, one engineering team and an optional 3–30
+# member pool. Role/team prompts live in instructions/. Secrets and instruction
+# publishing are plumbing in main.tf; this file is the whole organisation.
 #
-#                 representative
-#                       |
-#                   tech_lead
-#                  /         \
-#     senior_engineer ---- reviewer
-#
-# Every seat runs Pi (pi.dev), a coding agent, on an LLM from any
-# OpenAI-compatible endpoint. The three engineers form a team that works in
-# one GitHub repository.
+# representative -> tech_lead -> senior_engineer + reviewer + optional pool
+#       declared leadership    |       self-organising engineering
+
+variable "pool_enabled" {
+  description = "Add 3–30 native engineering peers using the same model and repository access."
+  type        = bool
+  default     = false
+}
+
+locals {
+  # Shared runtime settings, never shared identity or private memory.
+  participant = {
+    harness_profile   = "pi"
+    execution_profile = "interactive"
+    sandbox_profile   = "standard"
+    workspace         = { persistent = true }
+  }
+}
 
 resource "steadmesh_organization" "this" {
   key            = "example-org"
   display_name   = "Example Org"
   data_retention = "retain"
-  wait_for_ready = true # apply waits until every seat is up and verified
+  wait_for_ready = true # waits for declared seats; inspect runtime pool members separately
 
   spec = {
     # How everyone works (instructions/culture.md).
     culture_refs = [local.instructions["culture"]]
+
+    seats = {
+      tech_lead = merge(local.participant, {
+        display_name    = "Tech lead"
+        role_ref        = local.instructions["tech_lead"]
+        teams           = ["leadership", "engineering"]
+        personal_memory = "tech_lead"
+      })
+      senior_engineer = merge(local.participant, {
+        display_name    = "Senior engineer"
+        role_ref        = local.instructions["senior_engineer"]
+        teams           = ["engineering"]
+        personal_memory = "senior_engineer"
+      })
+      reviewer = merge(local.participant, {
+        display_name    = "Reviewer"
+        role_ref        = local.instructions["reviewer"]
+        teams           = ["engineering"]
+        personal_memory = "reviewer"
+      })
+      # Your voice in the organisation. You chat with it from a terminal.
+      representative = merge(local.participant, {
+        display_name    = "Representative"
+        role_ref        = local.instructions["representative"]
+        teams           = ["leadership"]
+        personal_memory = "representative"
+      })
+    }
+
+    # Coordination, editable context, pool capacity and authority are separate.
+    teams = {
+      leadership = {
+        coordination = { mode = "declared" }
+      }
+      engineering = {
+        instruction_refs = [local.instructions["team"]]
+        access_profiles  = ["github_repo"]
+        coordination = {
+          mode                       = "self_organising"
+          mission                    = "Deliver small, tested and independently reviewed changes to the configured GitHub repository."
+          work_store                 = "engineering"
+          mission_editors            = ["seat:tech_lead"]
+          review_policy              = "required"
+          max_messages_per_execution = 20
+        }
+        context = {
+          editable_instructions = false # Fixed prompts; memory stays writable.
+          editable_summary      = true
+        }
+        # Explicit opt-in: upgrading does not automatically add pool members.
+        # Bounds count pool members only, in addition to the four fixed seats.
+        pool = var.pool_enabled ? {
+          min_members           = 3
+          max_members           = 30
+          idle_timeout_seconds  = 900
+          drain_timeout_seconds = 300
+          retention_seconds     = 0     # Retain retired private data indefinitely.
+          draining              = false # Set true to stop admission and drain safely.
+          templates = {
+            engineer = {
+              instructions = "Collaborate as an independent engineer. Claim work on the engineering board, preserve evidence, and obtain another member's review before completion."
+              seat = merge(local.participant, {
+                display_name = "Pool engineer"
+                role_ref     = local.instructions["senior_engineer"]
+                # Runtime adds engineering membership and unique private memory.
+              })
+            }
+          }
+        } : null
+      }
+    }
+
+    # Memory: a notebook the team shares, plus a private one per seat.
+    memory_stores = {
+      engineering     = {}
+      tech_lead       = {}
+      senior_engineer = {}
+      reviewer        = {}
+      representative  = {}
+    }
+
+    # Memory authority is explicit and independent of prompts/context flags.
+    # The representative has read-only engineering memory, no GitHub access.
+    grants = {
+      engineering_memory = {
+        subject    = "team:engineering"
+        resource   = "memory:engineering"
+        operations = ["read", "search", "write", "revise", "archive", "publish", "history"]
+      }
+      representative_reads_engineering = {
+        subject    = "seat:representative"
+        resource   = "memory:engineering"
+        operations = ["read", "search"]
+      }
+    }
+
+    # Who may message whom. Seats can only talk along these routes.
+    message_routes = {
+      representative_to_lead = { from = "seat:representative", to = "seat:tech_lead", reply = true }
+      engineering_peers      = { from = "team:engineering", to = "team:engineering", bidirectional = true }
+    }
+
+    # You ("me" on the terminal connection) reach the representative here.
+    channel_bindings = {
+      me = {
+        connection       = "terminal"
+        external_user_id = "me"
+        seat             = "representative"
+        mode             = "direct_message"
+      }
+    }
+
+    # Output-token ceilings, not money, input-token or concurrency limits.
+    model_budgets = {
+      organization_daily_output_tokens = 100000
+      seat_daily_output_tokens         = 20000
+      execution_output_tokens          = 4000
+    }
 
     # External services, pointing at the key Secrets in main.tf.
     connections = {
@@ -34,12 +163,11 @@ resource "steadmesh_organization" "this" {
       terminal = { adapter = "terminal", secret_ref = "k8s:${kubernetes_secret_v1.terminal.metadata[0].name}" }
     }
 
-    # How a seat thinks: Pi is the agent (it reads, runs tools, edits code);
-    # the model behind it comes from the llm connection.
+    # All seats use Pi and the configured model.
     harness_profiles = {
       pi = {
         adapter      = "pi"
-        image_digest = "ghcr.io/darcys22/steadmesh/seat-pi:0.5.0"
+        image_digest = "ghcr.io/darcys22/steadmesh/seat-pi:0.7.0"
         model        = { connection = "llm", id = var.llm_model }
       }
     }
@@ -66,94 +194,6 @@ resource "steadmesh_organization" "this" {
           delivery    = "sandbox"
         }
       }
-    }
-
-    # Memory: a notebook the team shares, plus a private one per seat.
-    memory_stores = {
-      engineering     = {}
-      tech_lead       = {}
-      senior_engineer = {}
-      reviewer        = {}
-      representative  = {}
-    }
-
-    # The engineering team: shared instructions, shared memory, GitHub access.
-    teams = {
-      engineering = {
-        instruction_refs = [local.instructions["team"]]
-        shared_memory    = { engineering = ["read", "search", "write", "revise", "archive", "publish", "history"] }
-        access_profiles  = ["github_repo"]
-      }
-    }
-
-    seats = {
-      tech_lead = {
-        display_name      = "Tech lead"
-        role_ref          = local.instructions["tech_lead"]
-        teams             = ["engineering"]
-        harness_profile   = "pi"
-        execution_profile = "interactive"
-        sandbox_profile   = "standard"
-        personal_memory   = "tech_lead"
-        workspace         = { persistent = true }
-      }
-      senior_engineer = {
-        display_name      = "Senior engineer"
-        role_ref          = local.instructions["senior_engineer"]
-        teams             = ["engineering"]
-        harness_profile   = "pi"
-        execution_profile = "interactive"
-        sandbox_profile   = "standard"
-        personal_memory   = "senior_engineer"
-        workspace         = { persistent = true }
-      }
-      reviewer = {
-        display_name      = "Reviewer"
-        role_ref          = local.instructions["reviewer"]
-        teams             = ["engineering"]
-        harness_profile   = "pi"
-        execution_profile = "interactive"
-        sandbox_profile   = "standard"
-        personal_memory   = "reviewer"
-        workspace         = { persistent = true }
-      }
-      # Your voice in the organisation. You chat with it from a terminal.
-      representative = {
-        display_name      = "Representative"
-        role_ref          = local.instructions["representative"]
-        harness_profile   = "pi"
-        execution_profile = "interactive"
-        sandbox_profile   = "standard"
-        personal_memory   = "representative"
-        workspace         = { persistent = true }
-      }
-    }
-
-    # You ("me" on the terminal connection) reach the representative here.
-    channel_bindings = {
-      me = {
-        connection       = "terminal"
-        external_user_id = "me"
-        seat             = "representative"
-        mode             = "direct_message"
-      }
-    }
-
-    # The representative isn't on the team, but may read its notebook.
-    grants = {
-      representative_reads_engineering = {
-        subject    = "seat:representative"
-        resource   = "memory:engineering"
-        operations = ["read", "search"]
-      }
-    }
-
-    # Who may message whom. Seats can only talk along these routes.
-    message_routes = {
-      representative_to_lead = { from = "seat:representative", to = "seat:tech_lead", reply = true }
-      lead_engineer          = { from = "seat:tech_lead", to = "seat:senior_engineer", bidirectional = true }
-      lead_reviewer          = { from = "seat:tech_lead", to = "seat:reviewer", bidirectional = true }
-      engineer_reviewer      = { from = "seat:senior_engineer", to = "seat:reviewer", bidirectional = true }
     }
   }
 
