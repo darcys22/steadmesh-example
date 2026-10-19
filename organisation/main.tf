@@ -8,7 +8,7 @@ terraform {
   required_providers {
     steadmesh = {
       source  = "darcys22/steadmesh"
-      version = "~> 0.5.0"
+      version = "= 0.7.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"

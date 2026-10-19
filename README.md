@@ -1,7 +1,18 @@
 # Steadmesh example org
 
-A minimal [Steadmesh](https://github.com/darcys22/steadmesh) organisation: four
-AI agents ("seats") declared in Terraform and running on Kubernetes.
+A [Steadmesh](https://github.com/darcys22/steadmesh) organisation with four
+persistent AI agents ("seats"), native self-organising engineering coordination,
+and an opt-in pool of 3–30 additional independent engineers. Terraform declares
+the policy; Kubernetes runs the seats.
+
+**Start with [organisation/organisation.tf](organisation/organisation.tf).**
+That one file shows the seats, prompt references, team, pool, memory, model
+and permissions. The other Terraform files install the platform and wire secrets.
+
+This example pins the provider, chart, images and `orgctl` to **v0.7.0**.
+Confirm that its [release](https://github.com/darcys22/steadmesh/releases) has
+finished publishing all artifacts before installing. For development without
+live models, use the upstream [source examples](https://github.com/darcys22/steadmesh/tree/main/examples/native-hybrid).
 
 ```
                 representative        your voice in the org
@@ -16,6 +27,13 @@ choice from any OpenAI-compatible endpoint. Pi itself needs no key or
 account: it's the program that reads files, runs tools and edits code, and it
 calls the model through the platform. The three engineers share a team that can clone, push and open pull
 requests in one GitHub repository.
+
+The representative and tech lead form a declared leadership team. Engineering
+uses a shared work board and independent review; only the tech lead may refine
+its mission by default. The representative remains outside engineering with
+read-only access to its notebook. The four original seat keys, private stores
+and workspace settings are unchanged. Pool membership, context editing,
+memory permissions and message routes are configured independently.
 
 ## What's in here
 
@@ -60,6 +78,12 @@ private.)
   scoped to only that repository, with *Contents*, *Pull requests* and
   *Issues* set to read and write. Use a test repository.
 
+Do not enable the pool merely to validate the configuration. Applying this
+example uses your configured model and may incur charges, including readiness
+probes. The pool starts disabled. Review output-token limits and capacity before
+opting in; 30 pool members is not a promise that a 4-CPU / 8-GB cluster can run
+them all at once.
+
 ## Run it
 
 Run these commands from the root of your checkout (the directory containing
@@ -96,8 +120,42 @@ loading it. Use the same single file for both so Terraform, `orgctl` and
 
 **3. Install the platform**
 
+For an existing installation, read [Upgrading](#upgrading) first. Provider,
+chart, controller, platform, seat images and `orgctl` must match at 0.7.0.
+
 ```bash
 terraform -chdir=platform init
+terraform -chdir=platform apply
+```
+
+**Before creating the organisation, configure the credential ledger.** The
+first platform apply can run with `TF_VAR_credential_ledger_secret_name` empty
+so Terraform creates `steadmesh-system`. In v0.7.0, sandbox credential delivery
+is refused until the ledger is configured, including this example's GitHub PAT.
+
+Provision a stable, cryptographically random 32-byte key outside Terraform,
+using your secret manager or a protected local file. The Secret entry must
+contain its base64-encoded value. With a protected file that contains that
+value, you can create the Secret yourself:
+
+```bash
+kubectl --context "$TF_VAR_kube_context" -n steadmesh-system create secret generic steadmesh-credential-ledger \
+  --from-file=key=/absolute/path/to/protected-ledger-key
+```
+
+Do not print the key, put it in command arguments, `.env`, chart values or
+source control. Back it up separately from Postgres and preserve it across
+restarts/restores; all platform replicas must share it. Do not overwrite an
+existing key during an upgrade. See the
+[credential-ledger setup](https://steadmesh.com/operations.html#credential-ledger)
+for encoding, storage and rotation constraints.
+
+Set `TF_VAR_credential_ledger_secret_name=steadmesh-credential-ledger` in
+`.env`, then configure the platform with that **reference only**:
+
+```bash
+set -a; source .env; set +a
+terraform -chdir=platform plan
 terraform -chdir=platform apply
 ```
 
@@ -108,14 +166,15 @@ terraform -chdir=organisation init
 terraform -chdir=organisation apply
 ```
 
-`apply` returns once all four seats pass their readiness checks. The first
+`apply` returns once the four declared seats pass their readiness checks. The first
 time takes a few minutes while the seat images download.
 
 **5. Talk to your representative**
 
 ```bash
-go install github.com/darcys22/steadmesh/cmd/orgctl@v0.5.0
-orgctl chat --context "$TF_VAR_kube_context" --user me
+go install github.com/darcys22/steadmesh/cmd/orgctl@v0.7.0
+orgctl verify --context "$TF_VAR_kube_context" --namespace steadmesh --name example-org
+orgctl chat --context "$TF_VAR_kube_context" --namespace steadmesh --name example-org --user me
 ```
 
 ```
@@ -123,8 +182,8 @@ Chatting with me's representative over terminal. Ctrl-D or Ctrl-C to leave.
 you> Add a CONTRIBUTING.md to the repo explaining how to run the tests.
 ```
 
-Your representative passes the work to the tech lead, who shares it out with
-the senior engineer and the reviewer. They open a pull request in your
+Your representative passes the work to the tech lead. Engineering peers claim
+work on the shared board, implement it and obtain independent review. They open a pull request in your
 repository, and the representative reports back in the chat. If you leave
 the chat, its messages wait for you until you reconnect (they are lost if the
 platform restarts).
@@ -142,6 +201,42 @@ kubectl --context "$TF_VAR_kube_context" -n steadmesh-system port-forward deploy
 
 The console is read-only: you can see the seats, their messages and their
 work.
+
+## Enable the pool
+
+Uncomment `TF_VAR_pool_enabled=true` in `.env`, reload it, then plan and apply
+`organisation/`. That is the only extra toggle. The inline policy in
+[organisation/organisation.tf](organisation/organisation.tf) shows the rest:
+
+- Four fixed seats remain; the pool adds 3–30 independent peers with their own
+  inboxes, private memory, handoffs and workspaces. Available members are not
+  continuously generating, and the bound is not a simultaneous-execution cap
+- Engineering peers share the declared GitHub access, memory grant and message
+  route. Every pool engineer can read the same sandbox GitHub token. The
+  representative stays read-only on engineering memory and has no GitHub access
+- Working prompts are fixed, private summaries can change, and normal memory
+  is writable. Only the tech lead can refine the mission
+- Another member must review evidence with `work.review` before board work is
+  completed. GitHub PR review is separate; neither means permission to merge
+- Output-token ceilings are 100,000 per organisation/day, 20,000 per seat/day
+  and 4,000 per execution, plus 20 outgoing messages per execution. These do
+  not bound input tokens, currency cost, infrastructure or concurrency
+
+Peers discover each other with `teams.discover`, inspect `teams.pool`, and
+request useful capacity with `teams.grow`. Native pool members cannot start
+separate disposable task/branch/elastic workers. Declared seats retain their
+separate worker limits.
+
+To retire the pool, keep it enabled and change `pool.draining` to true in the
+same file before planning/applying. Retired private data is kept indefinitely
+(`retention_seconds = 0`); draining neither erases it nor proves work is done.
+
+For advanced changes, edit the visible policy directly: `coordination.mode`
+controls peer versus declared pool management; `mission_editors` controls
+mission changes; `context` flags control self-context separately from memory
+`grants`. Reviewed prompt edits additionally require explicit approvers and a
+different reviewer. See the [native-team guide](https://steadmesh.com/native-teams.html)
+for the combinations and approval/lifecycle rules.
 
 ## Change the org
 
@@ -168,6 +263,51 @@ terraform -chdir=organisation apply
 ```
 
 Seats keep their memory and workspace across applies.
+
+## Upgrading
+
+Keep the 0.7.0 pins in `platform/main.tf`, `organisation/main.tf`, the Pi image
+in `organisation/organisation.tf` and the `orgctl` command together. Do not
+mix a new provider with old platform or seat binaries.
+
+Back up Postgres, Terraform state and workspace volumes first. Follow the
+upstream [upgrade and permission-hardening guide](https://steadmesh.com/operations.html#v070-upgrade),
+including worker/controller quiescence and the credential-ledger key. Existing
+CRDs must be updated from a verified v0.7.0 source checkout before applying new
+organisation policies: Helm does not upgrade existing `crds/` entries. Use
+your explicit Kubernetes context, never delete/recreate the CRDs, and confirm
+they are established. Schema migrations run automatically and have no supported
+automatic rollback; a Helm rollback does not reverse them.
+
+After those prerequisites, initialize with `terraform init -upgrade` in each
+stage, review plans, apply `platform` before `organisation`, resync all affected
+organisations and run the explicit `orgctl verify` command above. The original
+resource and seat identities remain the same. Readiness of the declared seats
+does not verify every runtime pool member or autonomous engineering outcome.
+
+## Check without deploying
+
+After v0.7.0 is published, schema validation needs provider downloads but no
+cluster or live credentials:
+
+```bash
+terraform fmt -check -recursive
+terraform -chdir=platform init -backend=false
+terraform -chdir=platform validate
+terraform -chdir=organisation init -backend=false
+terraform -chdir=organisation validate
+```
+
+Terraform 1.7+ can also run the mocked configuration tests:
+
+```bash
+terraform -chdir=organisation test
+```
+
+These use placeholder values and mock providers to check the four-seat
+baseline, pool opt-in, bounds, identity separation and explicit permissions.
+They do not contact Kubernetes, apply resources, generate real credentials or
+call a model. Mocked tests do not establish live runtime behavior.
 
 ## Tear down
 

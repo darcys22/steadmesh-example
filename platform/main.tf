@@ -36,7 +36,7 @@ provider "helm" {
 }
 
 locals {
-  version  = "0.5.0"
+  version  = "0.7.0"
   registry = "ghcr.io/darcys22/steadmesh"
 }
 
@@ -75,6 +75,12 @@ resource "helm_release" "steadmesh" {
     database = {
       secretName = kubernetes_secret_v1.database_url.metadata[0].name
       secretKey  = "url"
+    }
+    # Existing Secret only: keep the stable ledger key outside Terraform and
+    # Helm. Without it v0.7 refuses all sandbox credential delivery, even PATs.
+    credentials = {
+      ledgerSecretName = var.credential_ledger_secret_name
+      ledgerSecretKey  = var.credential_ledger_secret_key
     }
     # Before starting any agent, the controller checks that the cluster
     # enforces network isolation, using this small probe image.

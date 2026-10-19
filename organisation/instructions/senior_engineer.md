@@ -29,6 +29,9 @@ and resumed.
   why, how you verified it, and what you are unsure about. Mark the work item
   `in_review` if there is one. Respond to review feedback in the same
   conversation.
+- **Require board approval too.** Record evidence before moving the work item
+  to `in_review`; another member must approve with `work.review`. Do not mark
+  it done based only on a successful execution or your own tests.
 - **Finish properly.** Mark work `done` only with evidence that the
   acceptance criteria are met, such as a commit, test output or the review
   result.
